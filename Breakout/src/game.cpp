@@ -33,7 +33,7 @@ GLboolean IsOtherPowerUpActive(std::vector<PowerUp>& powerUps, std::string type)
 
 
 Game::Game(GLuint width, GLuint height)
-    : State(GAME_MENU), Keys(), Width(width), Height(height) { }
+    : State(GAME_START), Keys(), Width(width), Height(height) { }
 
 Game::~Game() { }
 
@@ -67,14 +67,17 @@ void Game::Init()
     ResourceManager::LoadTexture("resources/textures/powerup_confuse.png", GL_TRUE, "powerup_confuse");
     // 加载关卡
     GameLevel one, two, three, four;
+    //GameLevel test;
     one.Load("resources/levels/one.lvl", this->Width, this->Height * 0.5f);
     two.Load("resources/levels/two.lvl", this->Width, this->Height * 0.5f);
     three.Load("resources/levels/three.lvl", this->Width, this->Height * 0.5f);
     four.Load("resources/levels/four.lvl", this->Width, this->Height * 0.5f);
+    //test.Load("resources/levels/zero.lvl", this->Width, this->Height * 0.5f);
     this->Levels.push_back(one);
     this->Levels.push_back(two);
     this->Levels.push_back(three);
     this->Levels.push_back(four);
+    //this->Levels.push_back(test);
     this->Level = 0;
     // 加载挡板
     glm::vec2 playerPos = glm::vec2(this->Width / 2 - PLAYER_SIZE.x / 2, this->Height - PLAYER_SIZE.y);
@@ -95,7 +98,9 @@ void Game::Init()
     // 加载字
     Text = new TextRenderer(this->Width, this->Height);
     Text->Load("resources/fonts/ocraext.TTF", 24);
+
     this->Lives = 3;
+    Effects->Chaos = true;
 }
 
 void Game::ResetLevel()
@@ -104,6 +109,7 @@ void Game::ResetLevel()
     else if (this->Level == 1)this->Levels[1].Load("resources/levels/two.lvl", this->Width, this->Height * 0.5f);
     else if (this->Level == 2)this->Levels[2].Load("resources/levels/three.lvl", this->Width, this->Height * 0.5f);
     else if (this->Level == 3)this->Levels[3].Load("resources/levels/four.lvl", this->Width, this->Height * 0.5f);
+    //else if (this->Level == 4)this->Levels[4].Load("resources/levels/zero.lvl", this->Width, this->Height * 0.5f);
     this->Lives = 3;
 }
 
@@ -155,6 +161,7 @@ void Game::Update(GLfloat dt)
         this->ResetPlayer();
         Effects->Chaos = true;
         this->State = GAME_WIN;
+        SoundEngine->play2D("resources/audio/victory.wav", false);
     }
 }
 
@@ -195,13 +202,13 @@ void Game::ProcessInput(GLfloat dt)
         }
         if (this->Keys[GLFW_KEY_W] && !this->KeyProcessed[GLFW_KEY_W])
         {
-            this->Level = (this->Level + 1) % 4;
+            this->Level = (this->Level + 1) % this->Levels.size();
             this->KeyProcessed[GLFW_KEY_W] = true;
         }
             
         if (this->Keys[GLFW_KEY_S] && !this->KeyProcessed[GLFW_KEY_S])
         {
-            this->Level > 0 ? --this->Level : this->Level = 3;
+            this->Level > 0 ? --this->Level : this->Level = this->Levels.size() - 1;
             this->KeyProcessed[GLFW_KEY_S] = true;
         }   
     }
@@ -214,11 +221,20 @@ void Game::ProcessInput(GLfloat dt)
             this->State = GAME_MENU;
         }
     }
+    if (this->State == GAME_START)
+    {
+        if (this->Keys[GLFW_KEY_ENTER])
+        {
+            this->KeyProcessed[GLFW_KEY_ENTER] = true;
+            this->State = GAME_MENU;
+            Effects->Chaos = false;
+        }
+    }
 }
 
 void Game::Render()
 {
-    if (this->State == GAME_ACTIVE || this->State == GAME_MENU)
+    if (this->State == GAME_ACTIVE || this->State == GAME_MENU || this->State==GAME_START)
     {
         Effects->BeginRender();
             // 绘制背景
@@ -244,8 +260,10 @@ void Game::Render()
     }
     if (this->State == GAME_MENU)
     {
+        std::stringstream levelss; levelss << this->Level + 1;
         Text->RenderText("Press ENTER to start", 250.0f, this->Height / 2, 1.0f);
         Text->RenderText("Press W or S to select level", 245.0f, this->Height / 2 + 20.0f, 0.75f);
+        Text->RenderText("Level:" + levelss.str(), 5.0f, this->Height - 20.0, 1.0f);
     }
     if (this->State == GAME_WIN)
     {
@@ -256,91 +274,103 @@ void Game::Render()
             "Press ENTER to retry or ESC to quit", 130.0, Height / 2, 1.0, glm::vec3(1.0, 1.0, 0.0)
         );
     }
+    if (this->State == GAME_START)
+    {
+        Text->RenderText(
+            "BREAKOUT", 210.0, Height * 2 / 5, 3.0, glm::vec3(1.0, 1.0, 0.0)
+        );
+        Text->RenderText(
+            "Press ENTER to start or ESC to quit", 130.0, Height * 2 / 3, 1.0, glm::vec3(1.0, 1.0, 0.0)
+        );
+    }
 }
 
 void Game::DoCollisions()
 {
-    // 砖块碰撞
-    for (GameObject& box : this->Levels[this->Level].Bricks)
+    if (this->State == GAME_ACTIVE)
     {
-        if (!box.Destroyed)
+        // 砖块碰撞
+        for (GameObject& box : this->Levels[this->Level].Bricks)
         {
-            Collision collision = CheckCollision(*Ball, box);
-            if (std::get<0>(collision))
+            if (!box.Destroyed)
             {
-                // 如果砖块不是实心就销毁砖块
-                if (!box.IsSolid)
+                Collision collision = CheckCollision(*Ball, box);
+                if (std::get<0>(collision))
                 {
-                    box.Destroyed = GL_TRUE;
-                    this->SpawnPowerUps(box);
-                    SoundEngine->play2D("resources/audio/bleep.mp3", false);
-                }
-                else
-                {   // 如果是实心的砖块则激活shake特效
-                    ShakeTime = 0.05f;
-                    Effects->Shake = true;
-                    SoundEngine->play2D("resources/audio/solid.wav", false);
-                }
-                // 碰撞处理
-                Direction dir = std::get<1>(collision);
-                glm::vec2 diff_vector = std::get<2>(collision);
-                if (!(Ball->PassThrough && !box.IsSolid))
-                {
-                    if (dir == LEFT || dir == RIGHT) // 水平方向碰撞
+                    // 如果砖块不是实心就销毁砖块
+                    if (!box.IsSolid)
                     {
-                        Ball->Velocity.x = -Ball->Velocity.x; // 反转水平速度
-                        // 重定位
-                        GLfloat penetration = Ball->Radius - std::abs(diff_vector.x);
-                        if (dir == LEFT)
-                            Ball->Position.x += penetration; // 将球右移
-                        else
-                            Ball->Position.x -= penetration; // 将球左移
+                        box.Destroyed = GL_TRUE;
+                        this->SpawnPowerUps(box);
+                        SoundEngine->play2D("resources/audio/bleep.mp3", false);
                     }
-                    else // 垂直方向碰撞
+                    else
+                    {   // 如果是实心的砖块则激活shake特效
+                        ShakeTime = 0.05f;
+                        Effects->Shake = true;
+                        SoundEngine->play2D("resources/audio/solid.wav", false);
+                    }
+                    // 碰撞处理
+                    Direction dir = std::get<1>(collision);
+                    glm::vec2 diff_vector = std::get<2>(collision);
+                    if (!(Ball->PassThrough && !box.IsSolid))
                     {
-                        Ball->Velocity.y = -Ball->Velocity.y; // 反转垂直速度
-                        // 重定位
-                        GLfloat penetration = Ball->Radius - std::abs(diff_vector.y);
-                        if (dir == UP)
-                            Ball->Position.y -= penetration; // 将球上移
-                        else
-                            Ball->Position.y += penetration; // 将球下移
+                        if (dir == LEFT || dir == RIGHT) // 水平方向碰撞
+                        {
+                            Ball->Velocity.x = -Ball->Velocity.x; // 反转水平速度
+                            // 重定位
+                            GLfloat penetration = Ball->Radius - std::abs(diff_vector.x);
+                            if (dir == LEFT)
+                                Ball->Position.x += penetration; // 将球右移
+                            else
+                                Ball->Position.x -= penetration; // 将球左移
+                        }
+                        else // 垂直方向碰撞
+                        {
+                            Ball->Velocity.y = -Ball->Velocity.y; // 反转垂直速度
+                            // 重定位
+                            GLfloat penetration = Ball->Radius - std::abs(diff_vector.y);
+                            if (dir == UP)
+                                Ball->Position.y -= penetration; // 将球上移
+                            else
+                                Ball->Position.y += penetration; // 将球下移
+                        }
                     }
                 }
             }
         }
-    }
-    // 挡板碰撞
-    Collision result = CheckCollision(*Ball, *Player);
-    if (!Ball->Stuck && std::get<0>(result))
-    {
-        // 检查碰到了挡板的哪个位置，并根据碰到哪个位置来改变速度
-        GLfloat centerBoard = Player->Position.x + Player->Size.x / 2;
-        GLfloat distance = (Ball->Position.x + Ball->Radius) - centerBoard;
-        GLfloat percentage = distance / (Player->Size.x / 2);
-        // 依据结果移动，撞击点距离挡板的中心点越远，则水平方向的速度就会越大
-        GLfloat strength = 2.0f;
-        glm::vec2 oldVelocity = Ball->Velocity;
-        Ball->Velocity.x = INITIAL_BALL_VELOCITY.x * percentage * strength;
-        Ball->Velocity.y = -std::abs(Ball->Velocity.y);
-        Ball->Velocity = glm::normalize(Ball->Velocity) * glm::length(oldVelocity);
-        
-        Ball->Stuck = Ball->Sticky;
-        SoundEngine->play2D("resources/audio/bleep.wav", false);
-    }
-    // 道具碰撞
-    for (PowerUp& powerup : this->PowerUps)
-    {
-        if (!powerup.Destroyed)
+        // 挡板碰撞
+        Collision result = CheckCollision(*Ball, *Player);
+        if (!Ball->Stuck && std::get<0>(result))
         {
-            if (powerup.Position.y >= this->Height)
-                powerup.Destroyed = GL_TRUE;
-            if (CheckCollision(*Player, powerup))
-            {   // 道具与挡板接触，激活它！
-                ActivatePowerUp(powerup);
-                powerup.Destroyed = GL_TRUE;
-                powerup.Activated = GL_TRUE;
-                SoundEngine->play2D("resources/audio/powerup.wav", false);
+            // 检查碰到了挡板的哪个位置，并根据碰到哪个位置来改变速度
+            GLfloat centerBoard = Player->Position.x + Player->Size.x / 2;
+            GLfloat distance = (Ball->Position.x + Ball->Radius) - centerBoard;
+            GLfloat percentage = distance / (Player->Size.x / 2);
+            // 依据结果移动，撞击点距离挡板的中心点越远，则水平方向的速度就会越大
+            GLfloat strength = 2.0f;
+            glm::vec2 oldVelocity = Ball->Velocity;
+            Ball->Velocity.x = INITIAL_BALL_VELOCITY.x * percentage * strength;
+            Ball->Velocity.y = -std::abs(Ball->Velocity.y);
+            Ball->Velocity = glm::normalize(Ball->Velocity) * glm::length(oldVelocity);
+
+            Ball->Stuck = Ball->Sticky;
+            SoundEngine->play2D("resources/audio/bleep.wav", false);
+        }
+        // 道具碰撞
+        for (PowerUp& powerup : this->PowerUps)
+        {
+            if (!powerup.Destroyed)
+            {
+                if (powerup.Position.y >= this->Height)
+                    powerup.Destroyed = GL_TRUE;
+                if (CheckCollision(*Player, powerup))
+                {   // 道具与挡板接触，激活它！
+                    ActivatePowerUp(powerup);
+                    powerup.Destroyed = GL_TRUE;
+                    powerup.Activated = GL_TRUE;
+                    SoundEngine->play2D("resources/audio/powerup.wav", false);
+                }
             }
         }
     }
@@ -403,22 +433,22 @@ Collision CheckCollision(BallObject& one, GameObject& two) // AABB - Circle coll
 
 void Game::SpawnPowerUps(GameObject& block)
 {
-    if (ShouldSpawn(75))
+    if (ShouldSpawn(45))
         this->PowerUps.push_back(
             PowerUp("speed", glm::vec3(0.5f, 0.5f, 0.5f), 0.0f, block.Position, 
                 ResourceManager::GetTexture("powerup_speed"))
         );
-    if (ShouldSpawn(75))
+    if (ShouldSpawn(30))
         this->PowerUps.push_back(
             PowerUp("sticky", glm::vec3(1.0f, 0.5f, 1.0f), 20.0f, block.Position, 
                 ResourceManager::GetTexture("powerup_sticky"))
         );
-    if (ShouldSpawn(75))
+    if (ShouldSpawn(30))
         this->PowerUps.push_back(
             PowerUp("pass-through", glm::vec3(0.5f, 1.0f, 0.5f), 10.0f, block.Position, 
                 ResourceManager::GetTexture("powerup_passthrough"))
         );
-    if (ShouldSpawn(75))
+    if (ShouldSpawn(30))
         this->PowerUps.push_back(
             PowerUp("pad-size-increase", glm::vec3(1.0f, 0.6f, 0.4), 0.0f, block.Position, 
                 ResourceManager::GetTexture("powerup_increase"))

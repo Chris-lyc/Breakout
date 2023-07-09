@@ -45,7 +45,7 @@ int main(int argc, char *argv[])
     GLfloat lastFrame = 0.0f;
 
     // Start Game within Menu State
-    Breakout.State = GAME_MENU;
+    Breakout.State = GAME_START;
 
     while (!glfwWindowShouldClose(window))
     {
